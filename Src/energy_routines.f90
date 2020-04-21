@@ -1201,6 +1201,8 @@ CONTAINS
     REAL(DP) :: mie_coeff, mie_n, mie_m
     REAL(DP) :: SigByR, SigByRn, SigByRm
     REAL(DP) :: SigByR_shift, SigByRn_shift, SigByRm_shift
+    ! Steele potential
+    REAL(DP) :: rho_s, delta
     ! Coulomb potential
     REAL(DP) :: qi, qj, Eij_qq
 
@@ -1298,6 +1300,20 @@ CONTAINS
                          SigByRm_shift = SigByR_shift ** mie_m
                          Eij_vdw =  Eij_vdw - mie_coeff * eps * (SigByRn_shift - SigByRm_shift)
                    END IF
+
+              ELSE IF (int_vdw_style(ibox) == vdw_steele) THEN
+                   eps = vdw_param1_table(itype,jtype)
+                   sig = vdw_param2_table(itype,jtype)
+                   ! I don't know what I"m doing here but I'm adding the rho and delta_z variables
+                   ! I'll go back and change these later
+                   rho_s = vdw_param3_table()
+                   delta = vdw_param4_table()
+                   steele_coeff = 2 * twoPI * eps * rho_s * (sig**2) * delta
+                   three_term = sig**4 / (3*delta*(rzij+0.61*delta)**3)
+                   Eij_vdw = steele_coeff * ((2/5)*(sig/rzij)**10 - (sig/rzij)**4 - three_term)
+
+               END IF
+
 
               END IF
 
