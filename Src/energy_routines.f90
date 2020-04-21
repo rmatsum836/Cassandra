@@ -1305,14 +1305,19 @@ CONTAINS
                    eps = vdw_param1_table(itype,jtype)
                    sig = vdw_param2_table(itype,jtype)
                    ! I don't know what I"m doing here but I'm adding the rho and delta_z variables
+
+                   ! Apply intramolecular scaling if necessary
+                   IF (is == js .AND. im == jm) THEN
+                     ! This controls 1-2, 1-3, and 1-4 interactions
+                     eps = eps * vdw_intra_scale(ia,ja,is)
+                   ENDIF
+
                    ! I'll go back and change these later
                    rho_s = vdw_param3_table()
                    delta = vdw_param4_table()
                    steele_coeff = 2 * twoPI * eps * rho_s * (sig**2) * delta
                    three_term = sig**4 / (3*delta*(rzij+0.61*delta)**3)
                    Eij_vdw = steele_coeff * ((2/5)*(sig/rzij)**10 - (sig/rzij)**4 - three_term)
-
-               END IF
 
 
               END IF
@@ -2223,7 +2228,7 @@ END SUBROUTINE Compute_Molecule_Self_Energy
     REAL(DP), INTENT(OUT) :: e_lrc
 
     INTEGER ::  ia, ja, is, js
-    REAL(DP) :: epsij, sigij, sigij2, sigij6, sigij12, mie_n, mie_m, mie_coeff
+    REAL(DP) :: epsij, sigij, sigij2, sigij6, sigij12, mie_n, mie_m, mie_coeff, rho_s, delta
     REAL(DP) :: SigOverRcut, SigOverRn, SigOverRm
     REAL(DP) :: e_lrc_ia_ja
 
@@ -2279,7 +2284,31 @@ END SUBROUTINE Compute_Molecule_Self_Energy
 
       END DO
       e_lrc = - 2.0_DP * PI * e_lrc/box_list(this_box)%volume
+
+    ELSE IF (int_vdw_style(this_box) == vdw_steele) THEN
+      DO ia = 1, nbr_atomtypes
+          e_lrc_ia_ja = 0.0_DP
+
+          DO ja = 1, nbr_atomtypes
+
+             epsij = vdw_param1_table(ia,ja)
+             sigij = vdw_param2_table(ia,ja)
+             rho_s = vdw_param3_table()
+             delta = vdw_param4_table()
+             steele_coeff = 2 * twoPI * eps * rho_s * (sig**2) * delta
+             three_term = sig**4 / (3*delta*(rzij+0.61*delta)**3)
+             Eij_vdw = steele_coeff * ((2/5)*(sig/rzij)**10 - (sig/rzij)**4 - three_term)
+
+             ! Need to figure out e_lrc_ia_ja
+
+          END DO
+          e_lrc = e_lrc + REAL( nint_beads(ia,this_box), DP ) * e_lrc_ia_ja
+
+      END DO
+      e_lrc = - 2.0_DP * PI * e_lrc/box_list(this_box)%volume
+
     END IF
+
 
   END SUBROUTINE Compute_LR_Correction
 
@@ -2405,7 +2434,7 @@ END SUBROUTINE Compute_Molecule_Self_Energy
 
    ELSE
       err_msg = ""
-      err_msg(1) = 'vdw_style must be NONE of LJ or Mie'
+      err_msg(1) = 'vdw_style must be NONE of LJ, steele, or Mie'
       CALL Clean_Abort(err_msg,'Compute_Atom_Nonbond_Energy')
 
    ENDIF VDW_Test2
@@ -2699,6 +2728,8 @@ END SUBROUTINE Compute_Molecule_Self_Energy
     REAL(DP) :: roffsq_rijsq, roffsq_rijsq_sq, factor2, fscale
     ! Mie potential
     REAL(DP) :: SigByR, SigByRn, SigByRm, mie_coeff, mie_n, mie_m
+    ! Steele potential
+    REAL(DP) :: rho_s, delta
     ! Coulomb potential
     REAL(DP) :: qi, qj, erfc_val, prefactor
     REAL(DP) :: rij, ewald_constant, exp_const
@@ -2765,6 +2796,17 @@ END SUBROUTINE Compute_Molecule_Self_Energy
            Wij_vdw = (mie_coeff * eps) *(mie_n * SigByRn - mie_m * SigByRm)
 
          ! Add other potential types here
+         ELSE IF (int_vdw_style(ibox) == vdw_steel) THEN
+           eps = vdw_param1_table(itype,jtype)
+           sig = vdw_param2_table(itype,jtype)
+           rho_s = vdw_param3_table()
+           delta = vdw_param4_table()
+           steele_coeff = 2 * twoPI * eps * rho_s * (sig**2) * delta
+           three_term = sig**4 / (3*delta*(rzij+0.61*delta)**3)
+           ! This needs to be changed
+           Eij_vdw = steele_coeff * ((2/5)*(sig/rzij)**10 - (sig/rzij)**4 - three_term)
+           Wij_vdw = Eij_vdw
+
          ENDIF
 
        ENDIF VDW_calc
@@ -2845,6 +2887,7 @@ END SUBROUTINE Compute_Molecule_Self_Energy
 
     INTEGER ::   is, js, ia, ja
     REAL(DP) :: mie_n, mie_m, mie_coeff
+    REAL(DP) :: rho_s, delta
     REAL(DP) :: SigOverR, SigOverRn, SigOverRm
 
     REAL(DP) :: epsij, sigij
@@ -2897,6 +2940,23 @@ END SUBROUTINE Compute_Molecule_Self_Energy
       END DO
 
       w_lrc =  2.0_DP / 3.0_DP * PI * w_lrc / box_list(this_box)%volume
+
+    ELSEIF (int_vdw_style(this_box) == vdw_steele) THEN
+
+      DO ia = 1, nbr_atomtypes
+
+         w_lrc_ia_ja = 0.0_DP
+         DO ja = 1, nbr_atomtypes
+            epsij = vdw_param1_table(ia,ja)
+            sigij = vdw_param2_table(ia,ja)
+            rho_s = vdw_param3_table()
+            delta = vdw_param4_table()
+            steele_coeff = 2 * twoPI * eps * rho_s * (sig**2) * delta
+            three_term = sig**4 / (3*delta*(rzij+0.61*delta)**3)
+            ! This needs to be changed
+            Eij_vdw = steele_coeff * ((2/5)*(sig/rzij)**10 - (sig/rzij)**4 - three_term)
+            Wij_vdw = Eij_vdw
+
     END IF
   END SUBROUTINE Compute_LR_Force
 
